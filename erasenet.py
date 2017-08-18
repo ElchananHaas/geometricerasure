@@ -74,7 +74,7 @@ y=BatchNormalization()(y)
 y=Activation('elu')(y)
 y=Conv2D(1,(3,3),padding='same',activation='sigmoid')(y) 
 diff=subtract_layer([x,y])
-error=keras.layers.core.ActivityRegularization(l1=0.0001)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
+error=keras.layers.core.ActivityRegularization(l1=0.00007)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
 generator=Model(inputs=x,outputs=[y,error])
 generator.compile(loss='mse', optimizer='nadam')
 
