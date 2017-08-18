@@ -14,8 +14,10 @@ import keras
 subtract_layer = Lambda(lambda inputs: inputs[0] - inputs[1],
                         output_shape=lambda shapes: shapes[0])
 '''
-You need to first wait for the disccriminator to converge some before the generator starts to make modifications. It takes a while before good erasure happens
-I will also try a residualnet style middle layers
+You need to first wait for the discriminator to converge some before the generator starts to make modifications. It takes a while before good erasure happens
+the squares aften end up somewhat rounded
+I will also try a residualnet style middle layers, they may keep the squares less rounded
+annealing the l1 loss may improve results
 '''
 s=96
 def createpair(size): # generate toy data
@@ -45,16 +47,16 @@ def createpairs(size,num):
 x=Input(shape=(s,s,1)) # build the image modification network
 skips=[]
 y=BatchNormalization()(x)
-for i in range(1,4):
+for i in range(1,4): #for loops make it easer to change network structure, and are easier to read
+	skips.append(y)
 	y=Conv2D(16*(2**i),(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
-	skips.append(y)
 	y=Conv2D(32*(2**i),(3,3),strides=(2,2),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
-for i in range(6):
-	y=Dense(256)(y)
+for i in range(6): # it finds out where triangle is in the dense layers. You need at least 4 to give acceptable results. 
+	y=Dense(512)(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
 for i in range(3,0,-1):
@@ -72,7 +74,7 @@ y=BatchNormalization()(y)
 y=Activation('elu')(y)
 y=Conv2D(1,(3,3),padding='same',activation='sigmoid')(y) 
 diff=subtract_layer([x,y])
-error=keras.layers.core.ActivityRegularization(l1=0.0001)(diff)
+error=keras.layers.core.ActivityRegularization(l1=0.0001)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
 generator=Model(inputs=x,outputs=[y,error])
 generator.compile(loss='mse', optimizer='nadam')
 
@@ -80,8 +82,8 @@ discriminatorinput=Input(shape=[s,s,1]) # build the discrimiator
 d=Conv2D(32,(3,3),activation='elu')(discriminatorinput)
 d=Conv2D(32,(3,3),activation='elu')(d)
 d=BatchNormalization()(d)
-d=Conv2D(64,(3,3),strides=(2,2),activation='elu')(d)
-d=Conv2D(64,(3,3),activation='elu')(d)
+d=Conv2D(32,(3,3),strides=(2,2),activation='elu')(d)
+d=Conv2D(32,(3,3),activation='elu')(d)
 d=BatchNormalization()(d)
 d=Conv2D(64,(3,3),strides=(2,2),activation='elu')(d)
 d=Conv2D(64,(3,3),activation='elu')(d)
@@ -89,12 +91,9 @@ d=BatchNormalization()(d)
 d=Conv2D(128,(3,3),strides=(2,2),activation='elu')(d)
 d=Conv2D(128,(3,3),activation='elu')(d)
 d=BatchNormalization()(d)
-d=Dense(256,activation='elu')(d)
-d=BatchNormalization()(d)
-d=Dense(256,activation='elu')(d)
-d=BatchNormalization()(d)
-d=Dense(256,activation='elu')(d)
-d=BatchNormalization()(d)
+for i in range(5): #again, plenty of dense layers are needed so the network can figure out what objects are there
+	d=Dense(256,activation='elu')(d)
+	d=BatchNormalization()(d)
 d=Dense(128,activation='elu')(d)
 d=Flatten()(d)
 d=Dense(1,activation='sigmoid')(d)
@@ -132,6 +131,6 @@ for count in range(10000):
 	fake=createpairs(s,16)[0]
 	ganloss=gan.train_on_batch(fake,ganlabels) # train the generator
 	print("discriminator loss",dloss,"generator loss",ganloss)
-	if(count%100==0): # show every 50 iterations
+	if(count%200==0): # show every 50 iterations
 		print("")
 		show(4)
