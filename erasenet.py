@@ -20,6 +20,7 @@ I will also try a residualnet style middle layers, they may keep the squares les
 annealing the l1 loss may improve results
 '''
 s=96
+savenum=0
 def createpair(size): # generate toy data
 	data = np.zeros((size,size))
 	circcenter=(randint(0,size),randint(0,size))
@@ -47,65 +48,74 @@ def createpairs(size,num):
 x=Input(shape=(s,s,1)) # build the image modification network
 skips=[]
 y=BatchNormalization()(x)
+y=Conv2D(32,(3,3),padding='same')(y)
 for i in range(1,4): #for loops make it easer to change network structure, and are easier to read
-	skips.append(y)
-	y=Conv2D(16*(2**i),(3,3),padding='same')(y)
+	skips.append(y)	
+	y=MaxPooling2D()(y)
+	y=Conv2D(32*(2**i),(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
-	y=Conv2D(32*(2**i),(3,3),strides=(2,2),padding='same')(y)
+	y=Conv2D(32*(2**i),(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
-for i in range(6): # it finds out where triangle is in the dense layers. You need at least 4 to give acceptable results. 
-	y=Dense(512)(y)
+for i in range(0):
+	addskip=y
+	y=Conv2D(256,(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
+	y=Conv2D(256,(3,3),padding='same')(y)
+	y=BatchNormalization()(y)
+	y=Activation('elu')(y)
+	y=keras.layers.Add()([addskip,y])
 for i in range(3,0,-1):
-	#print(i)
+	y=Conv2D(128,(3,3),padding='same')(y)
+	y=BatchNormalization()(y)
+	y=Activation('elu')(y)
 	y=Conv2D(32*(2**i),(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
 	y=UpSampling2D()(y)
 	y=keras.layers.concatenate([skips[i-1],y])
-	y=Conv2D(16*(2**i),(3,3),padding='same')(y)
-	y=BatchNormalization()(y)
-	y=Activation('elu')(y)
-y=Conv2D(16,(3,3),padding='same')(y)
+y=Conv2D(32,(3,3),padding='same')(y)
 y=BatchNormalization()(y)
 y=Activation('elu')(y)
 y=Conv2D(1,(3,3),padding='same',activation='sigmoid')(y) 
-diff=subtract_layer([x,y])
-error=keras.layers.core.ActivityRegularization(l1=0.00007)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
-generator=Model(inputs=x,outputs=[y,error])
-generator.compile(loss='mse', optimizer='nadam')
+#y=GaussianNoise(.3)(y)
 
+diff=subtract_layer([x,y])
+error=keras.layers.core.ActivityRegularization(l1=0.000004)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
+gen=Model(inputs=x,outputs=[y,error])
+g=Input(shape=[s,s,1])  
+out=gen(g)[0]  
+generator=Model(inputs=g,outputs=[out])
+generator.compile(loss='mse', optimizer='adam')
 discriminatorinput=Input(shape=[s,s,1]) # build the discrimiator
-d=Conv2D(32,(3,3),activation='elu')(discriminatorinput)
-d=Conv2D(32,(3,3),activation='elu')(d)
+d=discriminatorinput
+d=Conv2D(32,(3,3))(d)
 d=BatchNormalization()(d)
-d=Conv2D(32,(3,3),strides=(2,2),activation='elu')(d)
-d=Conv2D(32,(3,3),activation='elu')(d)
-d=BatchNormalization()(d)
-d=Conv2D(64,(3,3),strides=(2,2),activation='elu')(d)
-d=Conv2D(64,(3,3),activation='elu')(d)
-d=BatchNormalization()(d)
-d=Conv2D(128,(3,3),strides=(2,2),activation='elu')(d)
-d=Conv2D(128,(3,3),activation='elu')(d)
-d=BatchNormalization()(d)
-for i in range(5): #again, plenty of dense layers are needed so the network can figure out what objects are there
-	d=Dense(256,activation='elu')(d)
+d=Activation('elu')(d)
+for i in range(1,4): 
+	d=MaxPooling2D()(d)
+	d=Conv2D(32*(2**i),(3,3))(d)
 	d=BatchNormalization()(d)
-d=Dense(128,activation='elu')(d)
+	d=Activation('elu')(d)
+	d=Conv2D(32*(2**i),(3,3))(d)
+	d=BatchNormalization()(d)
+	d=Activation('elu')(d)
 d=Flatten()(d)
+for i in range(2):
+	d=Dense(512)(d)
+	d=BatchNormalization()(d)
+	d=Activation('elu')(d)
 d=Dense(1,activation='sigmoid')(d)
 discriminator=Model(inputs=discriminatorinput,outputs=d)
-dadam=Adam(lr=.001)
 discriminator.compile(loss='binary_crossentropy', optimizer='adam')
 
 for l in discriminator.layers:
 	l.trainable=False; 
 
 ganinput=Input(shape=[s,s,1]) # build the gan
-img=generator(ganinput)[0]
+img=generator(ganinput)
 ganout=discriminator(img)
 gan=Model(inputs=ganinput,outputs=ganout)
 gan.compile(loss='binary_crossentropy', optimizer='adam')
@@ -113,14 +123,23 @@ def show(n): # show images
 	b=createpairs(s,n)
 	targets=np.squeeze(b[1])
 	inputs=np.squeeze(b[0])
-	out=np.squeeze(generator.predict(b[0])[0])
+	out=np.squeeze(generator.predict(b[0]))
 	for i in range(n):
 		plt.subplot(3,3,i+1)
 		plt.imshow(inputs[i])
 		plt.subplot(3,3,i+5)
 		plt.imshow(out[i])
-	plt.show()
-
+	#plt.show()
+	global savenum
+	plt.savefig(str(savenum)+".png")
+	savenum+=1
+"""for count in range(10000):
+	c=createpairs(s,8)
+	loss=generator.train_on_batch(c[0],c[1])
+	print(loss)
+	if(count%100==0): # show every 50 iterations
+		print("")
+		show(4)"""
 for count in range(10000):
 	real=np.array(createpairs(s,8)[1])
 	fake=np.array(createpairs(s,8)[0])
@@ -131,6 +150,6 @@ for count in range(10000):
 	fake=createpairs(s,16)[0]
 	ganloss=gan.train_on_batch(fake,ganlabels) # train the generator
 	print("discriminator loss",dloss,"generator loss",ganloss)
-	if(count%200==0): # show every 50 iterations
+	if(count%100==0): # show every 50 iterations
 		print("")
 		show(4)
