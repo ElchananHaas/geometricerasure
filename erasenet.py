@@ -16,7 +16,8 @@ subtract_layer = Lambda(lambda inputs: inputs[0] - inputs[1],
 '''
 You need to first wait for the discriminator to converge some before the generator starts to make modifications. It takes a while before good erasure happens
 the squares aften end up somewhat rounded
-I will also try a residualnet style middle layers, they may keep the squares less rounded
+I am using a patchGAN becuase it is giving far better results
+Experience replay could stabalize training more
 annealing the l1 loss may improve results
 '''
 s=96
@@ -68,7 +69,7 @@ for i in range(0):
 	y=Activation('elu')(y)
 	y=keras.layers.Add()([addskip,y])
 for i in range(3,0,-1):
-	y=Conv2D(128,(3,3),padding='same')(y)
+	y=Conv2D(32*(2**i),(3,3),padding='same')(y)
 	y=BatchNormalization()(y)
 	y=Activation('elu')(y)
 	y=Conv2D(32*(2**i),(3,3),padding='same')(y)
@@ -83,7 +84,7 @@ y=Conv2D(1,(3,3),padding='same',activation='sigmoid')(y)
 #y=GaussianNoise(.3)(y)
 
 diff=subtract_layer([x,y])
-error=keras.layers.core.ActivityRegularization(l1=0.000004)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
+error=keras.layers.core.ActivityRegularization(l1=0.0000002)(diff) #much higher l1 loss and it doesn't make any changes, much lower and it fails to resemble the original image, or converge at all
 gen=Model(inputs=x,outputs=[y,error])
 g=Input(shape=[s,s,1])  
 out=gen(g)[0]  
@@ -91,26 +92,23 @@ generator=Model(inputs=g,outputs=[out])
 generator.compile(loss='mse', optimizer='adam')
 discriminatorinput=Input(shape=[s,s,1]) # build the discrimiator
 d=discriminatorinput
-d=Conv2D(32,(3,3))(d)
-d=BatchNormalization()(d)
+d=Conv2D(32,(3,3),padding='same')(d)
+#d=BatchNormalization()(d)
 d=Activation('elu')(d)
 for i in range(1,4): 
-	d=MaxPooling2D()(d)
-	d=Conv2D(32*(2**i),(3,3))(d)
-	d=BatchNormalization()(d)
+	d=MaxPooling2D(padding='same')(d)
+	d=Conv2D(32*(2**i),(3,3),padding='same')(d)
+	#d=BatchNormalization()(d)
 	d=Activation('elu')(d)
-	d=Conv2D(32*(2**i),(3,3))(d)
-	d=BatchNormalization()(d)
+	d=Conv2D(32*(2**i),(3,3),padding='same')(d)
+	#d=BatchNormalization()(d)
 	d=Activation('elu')(d)
-d=Flatten()(d)
-for i in range(2):
-	d=Dense(512)(d)
-	d=BatchNormalization()(d)
-	d=Activation('elu')(d)
-d=Dense(1,activation='sigmoid')(d)
+d=Conv2D(1,(1,1),padding='same')(d)
+#d=BatchNormalization()(d)
+d=Activation('sigmoid')(d)
 discriminator=Model(inputs=discriminatorinput,outputs=d)
 discriminator.compile(loss='binary_crossentropy', optimizer='adam')
-
+discriminator.summary()
 for l in discriminator.layers:
 	l.trainable=False; 
 
@@ -141,13 +139,13 @@ def show(n): # show images
 		print("")
 		show(4)"""
 for count in range(10000):
-	real=np.array(createpairs(s,8)[1])
-	fake=np.array(createpairs(s,8)[0])
+	real=np.array(createpairs(s,16)[1])
+	fake=generator.predict(createpairs(s,16)[0])
 	images=np.concatenate([real,fake])
-	labels=np.concatenate([np.ones(8),np.zeros(8)])
+	labels=np.concatenate([np.ones((16,12,12,1)),np.zeros((16,12,12,1))])
 	dloss=discriminator.train_on_batch(images,labels) # train the discriminator
-	ganlabels=np.ones(16)
-	fake=createpairs(s,16)[0]
+	ganlabels=np.ones((32,12,12,1))
+	fake=createpairs(s,32)[0]
 	ganloss=gan.train_on_batch(fake,ganlabels) # train the generator
 	print("discriminator loss",dloss,"generator loss",ganloss)
 	if(count%100==0): # show every 50 iterations
